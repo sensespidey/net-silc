@@ -1,0 +1,169 @@
+TODO List for Net::SILC and Net::SILC::Client
+=============================================
+
+Net::SILC
+---------
+
+* review and clean up this list!
+
+* update everything to use latest silc-toolkit
+
+* construct Net::SILC::Event module to correspond to relevant silc events -> see bottom
+
+* provide add_handler and add_global_handler routines to add event handlers
+  to the (perl callback) queue for a given Net::SILC::Event.
+  * the structure of this stuff is now in place, but stuff like do_one_loop
+    really needs to be cleaned up to properly handle Client.pm objects, as
+    well as preserve the old (filehandle-based) functionality.
+(WORKS!)
+
+* provide generic callbacks to be triggered by SILC::Client, that will in
+  turn trigger client-registered Net::SILC 'handler' routines using
+  Net::SILC::Event module
+  * started on this one, tho i'm still debating whether these should
+    properly go in the Net::SILC namespace or directly in Net::SILC::Client
+    itself. either way, the routines are basically stolen from debugclient.pl
+(MOSTLY WORKS!)
+
+* trigger any global callbacks that registered for 'connect' events when a
+  newconn() is successfully made (per-connection callbacks are currently
+  impossible, because newconn wont give you back a Net::SILC::Client object
+  unless it's already connected- this might be a poor model ultimately, but
+  it's the best we could get working right now!)
+-> this has been changed, and per-connection callbacks now work, and are
+triggered the first time one calls run/run_once on the connection.
+
+* provide scheduling/timeout hooks (see Net::IRC for this)
+
+* (eventually) open up access to the rest of the silc-toolkit set of
+  libraries, as per c0ffee's suggestions with the 'Silc.pm' module..
+  (low priority for now, since multiprecision integer math and random
+  number generation stuff are already available in CPAN, and while i admit
+  that reproducing them might have valuable effects in general, they do not
+  immediately contribute to my more general project- bots ;p)
+
+Net::SILC::Client
+-----------------
+
+
+* extend the callback framework to pass all (SilcClientOperations) callbacks onto perl..
+
+  * pass silc_disconnected triggers  (TEST!)
+  * pass silc_notify message triggers (server notifies) (MORE TESTING!)
+
+  * pass silc_command triggers (upon sending a command) (not needed?)
+  * pass silc_command_reply triggers (upon server replying to command) (MOSTLY WORKING)
+
+  * silc_failure (ignored for now)
+  * silc_key_agreement (ignored for now)
+  * silc_ftp (ignored for now)
+  * silc_detach (ignored)
+
+* schedule stuff?? (from Net::IRC)
+
+* provide perl-level accessor routines for key silcclient functions:
+  * silc_client_close_connection (to correspond to silc_client_connect_to_server)
+    -> is it this that triggers the silc_disconnected callback, or (also?)
+       getting kicked/dropped from a server?
+
+* can probly replicate the add/remove_fh routines, from
+  Net::IRC::Connection, as well as the message/handler queueing methods
+  add_(global_)handler and the relevant Net::SILC::Event stuff
+  * but need to modify do_one_loop to include these fh queues as well as
+    the Client.pm object list
+
+* provide DESTROY methods, and surrounding helpers to call silc_client_free and silc_free
+* remove memory leak stuff, and figure out why it's chewing up cpu ;p
+
+Net::IRC/SILC Event Mapping
+---------------------------
+
+(see degugclient.pl for implementation of this mapping into perl)
+
+Net::IRC         =>     silcclient callback
+--------		-------------------
+
+public		 =>	silc_channel_message
+msg		 =>	silc_private_message
+caction		 =>     silc_channel_message (with ACTION flag set)
+
+nick		 =>	notify + command_reply (NICK)
+join		 =>	notify + command_reply (JOIN)
+part		 =>	notify + command_reply (LEAVE)
+
+mode		 =>	notify + command_reply (CMODE)
+umode		 =>	notify + command_reply (CUMODE)
+cumode		 =>	notify + command_reply (CUMODE)
+
+quit		 =>	notify + command_reply (SIGNOFF)
+topic		 =>	notify + command_reply (TOPIC)
+
+invite		 =>	notify + command_reply (INVITE)
+kick		 =>	notify + command_reply (KICK)
+
+connect		 =>	silc_connected
+disconnect	 =>	silc_disconnected
+
+kill		 =>	notify + command_reply (KILL)
+error		 =>	notify (ERROR)
+notice		 =>	notify (NONE)
+
+SilcNotifyType Mapping (to Net::SILC::Event)
+--------------------------------------------
+
+(see http://silcnet.org/docs/draft-riikonen-silc-pp-08.txt)
+(also http://silcnet.org/docs/toolkit/notifyargs.html)
+
+SILC_NOTIFY_TYPE_NONE (0)		=> notify(NONE)
+SILC_NOTIFY_TYPE_INVITE (1)		=> notify(INVITE)
+SILC_NOTIFY_TYPE_JOIN (2)		=> notify(JOIN)
+SILC_NOTIFY_TYPE_LEAVE (3)		=> notify(LEAVE)
+SILC_NOTIFY_TYPE_SIGNOFF (4)		=> notify(SIGNOFF)
+SILC_NOTIFY_TYPE_TOPIC_SET (5)		=> notify(TOPIC)
+SILC_NOTIFY_TYPE_NICK_CHANGE (6)	=> notify(NICK)
+SILC_NOTIFY_TYPE_CMODE_CHANGE (7)	=> notify(CMODE)
+SILC_NOTIFY_TYPE_CUMODE_CHANGE (8)	=> notify(CUMODE)
+SILC_NOTIFY_TYPE_MOTD (9)		=> notify(MOTD)
+SILC_NOTIFY_TYPE_CHANNEL_CHANGE (10)	=> notify(CHANNEL)
+SILC_NOTIFY_TYPE_SERVER_SIGNOFF (11)	=> ignored
+SILC_NOTIFY_TYPE_KICKED (12)		=> notify(KICK)
+SILC_NOTIFY_TYPE_KILLED (13)		=> notify(KILL)
+SILC_NOTIFY_TYPE_UMODE_CHANGE (14)	=> notify(UMODE)
+SILC_NOTIFY_TYPE_BAN (15)		=> ignored
+SILC_NOTIFY_TYPE_ERROR (16)		=> notify(ERROR)
+SILC_NOTIFY_TYPE_WATCH (17)		=> notify(WATCH)
+
+
+SilcClientCommand Event Mapping (to Net::SILC::Event)
+-----------------------------------------------------
+
+(see http://silcnet.org/docs/draft-riikonen-silc-commands-06.txt)
+(also http://silcnet.org/docs/toolkit/command_reply_args.html)
+
+SILC_COMMAND_NONE     (0)	=>	command_reply(NONE)
+SILC_COMMAND_WHOIS    (1)	=>	command_reply(WHOIS)
+SILC_COMMAND_WHOWAS   (2)	=>	command_reply(WHOWAS)
+SILC_COMMAND_IDENTIFY (3)	=>	command_reply(IDENTIFY)
+SILC_COMMAND_NICK     (4)	=>	command_reply(NICK)
+SILC_COMMAND_LIST     (5)	=>	command_reply(LIST)
+SILC_COMMAND_TOPIC    (6)	=>	command_reply(TOPIC)
+SILC_COMMAND_INVITE   (7)	=>	command_reply(INVITE)
+SILC_COMMAND_QUIT     (8)	=>	command_reply(QUIT)
+SILC_COMMAND_KILL     (9)	=>	command_reply(KILL)
+SILC_COMMAND_INFO     (10)	=>	command_reply(INFO)
+SILC_COMMAND_STATS    (11)	=>	command_reply(STATS)
+SILC_COMMAND_PING     (12)	=>	command_reply(PING)
+SILC_COMMAND_OPER     (13)	=>	command_reply(OPER)
+SILC_COMMAND_JOIN     (14)	=>	command_reply(JOIN)
+SILC_COMMAND_MOTD     (15)	=>	command_reply(MOTD)
+SILC_COMMAND_UMODE    (16)	=>	command_reply(UMODE)
+SILC_COMMAND_CMODE    (17)	=>	command_reply(CMODE)
+SILC_COMMAND_CUMODE   (18)	=>	command_reply(CUMODE)
+SILC_COMMAND_KICK     (19)	=>	command_reply(KICK)
+SILC_COMMAND_BAN      (20)	=>	command_reply(BAN)
+SILC_COMMAND_DETACH   (21)	=>	command_reply(DETACH)
+SILC_COMMAND_WATCH    (22)	=>	command_reply(WATCH)
+SILC_COMMAND_SILCOPER (23)	=>	command_reply(SILCOPER)
+SILC_COMMAND_LEAVE    (24)	=>	command_reply(LEAVE)
+SILC_COMMAND_USERS    (25)	=>	command_reply(USERS)
+SILC_COMMAND_GETKEY   (26)	=>	command_reply(GETKEY)

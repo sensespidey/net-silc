@@ -1,0 +1,8 @@
+Changes
+Makefile.PL
+MANIFEST
+README
+TODO
+t/Net-SILC.t
+lib/Net/SILC/Client.pm
+debugclient.pl

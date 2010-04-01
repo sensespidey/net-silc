@@ -1,0 +1,25 @@
+Revision history for Perl extension SILC::Client.
+
+0.01  Wed Jul 28 22:26:40 2004
+	- original version; created by h2xs 1.23 with options
+		-PAXn SILC::Client
+
+0.1   Sat Aug 14 07:08:00 2004
+	- first functioning version (barebones SilcClient functionality)
+	- provides SilcClientOperations callback structure mechanisms:
+	  - silc_connected
+	  - silc_say
+	  - silc_channel_message
+	  - silc_private_message
+	- these SilcClientOperations are implemented, but do not callback to perl
+	  - silc_get_auth_method (no-so-silently skipped for now (stderr))
+	  - silc_verify_public_key (not-so-silently skipped for now (stderr))
+	  - silc_ask_passphrase (not-so-silently skipped for now (stderr))
+	- provides accessor methods to join channels, send messages, commands, etc
+	  - connect (wrapper for silc_client_connect_to_server)
+	  - command (wrapper for silc_client_command_call)
+	  - join (wrapper for command = /JOIN)
+	  - nick (wrapper for command = /NICK)
+	  - chanmsg (wrapper for silc_client_send_channel_message)
+	  - privmsg (wrapper for silc_client_send_private_message)
+	  - run (wrapper for silc_client_run)

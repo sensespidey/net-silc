@@ -1,0 +1,352 @@
+SILC::Client development README (18aug04 - updated 30nov07)
+-----------------------------------------
+
+The ultimate goal is to build a Net::SILC module that's functionally
+equivalent to Net::IRC.  This effectively amounts to building a perl layer
+on top of the existing silc-toolkit's silcclient library.  
+
+The main point for me is to allow mozbot to be readily ported to silc, but most
+other perl bots and useful irc scripts should be trivial as well.
+
+In a manner similar to the layout of the Net::IRC (set of) module(s), I've
+broken this down into three pieces. 
+
+First, a Net::SILC::Client module that simply replicates the existing
+silcclient library's API and paradigm, and is not directly compatible with the
+Net::IRC interface. This is the base layer, and consists of perl XS/C code,
+which I'm a complete n00b at, and only ever barely stood on its feet. 
+
+Second, a Net::SILC module that uses the Net::SILC::Client module to
+translate between the silclient library modality and the Net::IRC paradigm
+which perl hackers are used to. This module is the glue for the whole package,
+and should ultimately provide all the same functionality that Net::IRC does,
+plus a few niceties from the SILC world, to boot.
+
+This is where most of the real work lies, because each kind of
+event that the silc-toolkit can trigger needs to be implemented as a
+Net::IRC-compatible Event object.
+
+Third, a Net::SILC::Event module to represent events that get passed back to
+global handlers. This is a relatively generic information-passing object, and I
+pasted much of the initial code directly from Net::IRC::Event :)
+
+Perl scripts can use this interface by telling the Net::SILC object that it
+would like to listen for a specific event, and passes a coderef to be run
+when that event happens.  Stealing a bit from the SYNOPSIS section of 'perldoc
+Net::IRC', the use of this module will look like this:
+
+    use Net::SILC;
+
+    $silc = new Net::SILC;
+
+    $conn = $silc->newconn(Nick    => 'some_nick',
+                           Server  => 'some.silc.server.com');
+
+    $silc->add_global_handler($conn,"connected",\&on_connect);
+
+
+At this point, the Net::SILC::Client basically does all we'll need it to
+do, for the time being.  As we expand it's functionality, more (C)
+callbacks will need to be filled in (handling of more silc_notify and
+silc_command_reply events, primarily)- making the existing debugclient.pl
+nearly obsolete.  Fortunately, much of this callback code can soon be
+incorporated directly into Net::SILC, and a perl coder need never worry
+about the ugly text-based protocol by which the silc-toolkit's callback
+information (which is richly described in C types, when it's received by
+Net::SILC::Client) gets transferred into perlspace callbacks (losing much
+of the silc-specific info).
+
+I've just made a first pass at stealing all the relevant pieces of code from
+the Net::IRC modules, and made some initial strokes at adapting some routines
+(newconn, for instance) to the Net::SILC::Client mode of thinking.  I've
+also implemented a rudimentary Event.pm, which shouldn't need to change
+significantly, except insofar as it handles the names of events.  Finally,
+i've added a bunch of routines to Net::SILC::Client to make it act more
+like a Net::IRC::Connection object, notably the add_handler and
+add_global_handler routines.  Most of these are currently unchanged from
+net-irc, but fortunately that code is quite general, and shouldn't need
+significant changes, really.
+
+because silc events are significantly less prolific (and simply encode more
+info directly in the callback args), this will be a finicky piece of work,
+but i've done my best to work out a mapping of events that make sense,
+based on the most frequently used of the irc events.  See below for more
+details..
+
+
+Getting Started
+---------------
+
+NB: this stuff is woefully out of date, and one of the first TODO items on the
+list must be to update everything to the latest version of the silc-toolkit
+
+To get started, you'll need to setup an appropriate development environment,
+which mostly means compiling and installing the silc-toolkit on yer
+workstation:
+
+cd /usr/local/src
+wget http://silcnet.org/download/toolkit/sources/silc-toolkit-0.9.12.tar.bz2
+tar xvfj silc-toolkit-0.9.12.tar.bz2
+cd silc-toolkit-0.9.12
+./configure --enable-shared --enable-debug
+make
+(sudo) make install
+
+it's likely that you're also wise to install some development/debugging perlmodules:
+
+apt-get install libperl-dev perl-debug
+
+this will allow you to use gdb to backtrace things when the code segfaults:
+
+gdb debugperl core
+(gdb) run debugclient.pl
+
+Net::SILC
+---------
+
+When it works properly, Net::Silc::Client will provide much of the needed
+functionality for producing a Net::SILC module equivalent to Net::IRC's
+interface.  The key difference will be in how callbacks are handled.  The
+silc-toolkit silcclient library expects a set of callback routines to be passed
+to it on startup, and uses static references to these routines to trigger all
+the various kinds of events. 
+
+The main part of Net::SILC's job, then, will be to wrap a Net::SILC::Client object,
+provide default callback handlers to the Net::SILC::Client instance it wraps around,
+and allow for new handlers to be added while the client is running and
+connected to the server.  The way it will do this is to pass a set of
+generic (perl) callbacks (a la debugclient.pl) to every new SILC::Client
+object it creates, and then these callbacks will in turn be responsible for
+producing new Net::SILC::Event objects, queueing them, and handling them.
+
+Net::IRC does this using the add_handler and add_global_handler routines, which
+pick out a given event (really, an arrayref of events), and pass a subroutine
+reference to be called when that event happens.  I've stolen these routines
+wholesale, so the Client.pm module keeps a set of local and global
+handlers, and it's constructor routine stores a copy of the Net::SILC
+'parent' factory, so that it can queue events and have them handled by
+Silc.pm's do_one_loop routine.
+
+The secondary piece of Net::SILC amounts to building a Net::SILC::Event
+module to provide an abstraction layer between the silc 'callback triggers'
+and the Net::IRC 'events' (which in turn correspond to the IRC protocol
+definitions fairly directly- with silc, we dont have quite the same
+rigorous definition of event names/numbers, but should be able to
+approximate the important pieces without much trouble.. see bottom part of
+TODO file for an attempt to start this mapping).  See description of
+Net::SILC::Event module below for a list of 'silc events' we should provide
+to Net::SILC users for barebones irc-like functioning..
+
+Net::SILC::Client
+-----------------
+
+Using Inline::C, i've put together a Client.pm module that uses the core
+functionality of the  silcclient library.  Client.pm splits the various pieces
+of initializing and starting a SilcClient (and SilcClientConnection)
+into logical units and defines them in a few short C routines included Inline.
+
+These are: 
+
+client_create()  -> called by the perl new() routine which constructs Silc::Client objects
+get_key_pair()   -> called by the perl connect() routine to create/load the keypairs
+client_connect() -> called by connect() and calls silc_client_connect_to_server() to initiate server connection
+client_command() -> called by command() and calls silc_client_command_call() to send commands to server
+
+thus, my debugclient.pl can simply say:
+
+	my $client = new Net::SILC::Client($user,$callbacks);
+
+	my $server = "silc.icore.at";
+	$client->connect($server); # will cause the 'connected' callback to be triggered
+
+and expect the silc_connected callback to be triggered when the client connects.
+the user and callbacks hashes are defined thusly:
+
+	my $user = { username => "example",
+		     realname => "example user",
+		     hostname => "example.com",
+		     keyfile => "example.pub"
+		   }; # example.prv is assumed
+
+	my $callbacks = { silc_say => \&say,
+			  silc_channel_message => \&channel_message,
+			  silc_private_message => \&private_message,
+			  silc_notify => \&notify,
+			  silc_command => \&command,
+			  silc_command_reply => \&command_reply,
+			  silc_connected => \&connected,
+			  silc_disconnected => \&disconnected,
+			  silc_get_auth_method => \&get_auth_method,
+			  silc_verify_public_key => \&verify_public_key,
+			  silc_ask_passphrase => \&ask_passphrase,
+			  silc_failure => \&failure,
+			  silc_key_agreement => \&key_agreement,
+			  silc_ftp => \&ftp,
+			  silc_detach => \&detach,
+			};
+
+The perl callback routines then need to be called by their corresponding C
+callbacks in the Client.pm Inline section.  Much of this glue code is now
+filled in, with a few key pieces missing that weren't required for
+"barebones" functioning (notify, command, and command_reply callbacks,
+notably).  
+
+Most of the silc_notify events are now being sent in a rudimentary way up
+to the perl callback for notify.  this is basically a simple string-based
+protocol to communicate the notify type and args to perl, and is intended
+only as an internal implementation solution to transfer this info into
+perl, after which Net::SILC itself will turn this info into the relevant
+Net::SILC::Event objects, and pass them to any user-registered handlers..
+
+At this point, the debugclient.pl script can successfully connect to a
+server, join a channel, change its nick, and send/receive messages,
+and get notification of most of these events at the perl level.  I've also
+added the (messy) code into silc_command_reply to send all info related to
+(the most interesting of the) command events, once the server has run them
+(error checking of these commands is as-yet unhandled)- as such,
+debugclient.pl is now quite verbose about everything it can do, printing
+messages about all the notify and command_reply events it sees..
+
+Net::SILC::Event
+----------------
+
+Net::SILC::Events come in two main types, plus a few extra ones that are
+handled specially (messages, connecting, etc).  the first are NOTIFY
+events, which come from the silc_notify callback, and are generally things
+happening on the silc network that the botclient didn't initiate.  the
+second type are COMMAND_REPLY events, which are generated after the
+botclient sends a command, and the server processes it.  (note we may need
+to incorporate some COMMAND events, which get called after a command is
+sent, but before it gets a reply from server.. but probly not for awhile).
+
+based on my work this week, these are the SILC events i think we're gonna
+need to provide (for starters, at least) to make mozbot play nice (first
+column is event name, mainly stolen from net-irc; second column is name
+used by SILC::Client, third column indicates if it's a notify event, a
+command_reply event, or both):
+
+invite		=> INVITE	(n+c)
+join		=> JOIN		(n+c)
+part		=> LEAVE	(n+c)
+quit		=> SIGNOFF	(n)
+topic		=> TOPIC	(n+c)
+nick		=> NICK		(n+c)
+
+motd		=> MOTD		(n+c)
+kick		=> KICK		(n+c)
+ban		=> BAN		(n+c)
+kill		=> KILL 	(n+c)
+
+list		=> LIST		(c)
+users		=> USERS	(c)
+
+quit		=> QUIT		(c)
+oper		=> OPER		(c)
+silcoper	=> SILCOPER 	(c)
+
+privmsg 	=> private_message callback needs to generate these
+chanmsg 	=> channel_message callback needs to generate these
+
+connect		=> connected callback needs to generate these
+disconnect	=> disconnected callback needs to generate these
+
+whois		=> WHOIS	(c)
+
+(not sure how useful these two are)
+channelid?	=> CHANNELID 	(n) 
+serversignoff	=> SERVERSIGNOFF(n)
+
+# mode stuff is different in silc than irc- not sure how to avoid confusion
+# here (ie. what kinda 'mode' does the standard net-irc 'mode' event refer
+# to? is it like a silc 'cumode' or more like a silc 'umode')
+mode		=> ??
+cmode		=> CMODE
+umode		=> UMODE
+cumode		=> CUMODE
+
+
+DEVELOPMENT NOTES
+----------------
+
+1. It should be noted that i ran into a major difficulty (described briefly
+below), where the Client.pm code would segfault when it received a callback
+to it's silc_channel_message() function.  It turns out that the example
+callback code for this function, which i stole from mybot.c has changed
+slightly in newer versions of the api.  Thus, for future reference, the
+silcclient.h header file which defines all these callback function
+prototypes should be regarded as the authoritative source. 
+
+(original description of the problem follows..)
+	Using the gdb method described earlier, i've backtraced the offending line to
+	the silc_channel_message callback which Client.pm defines, and is exactly the
+	one stolen from mybot.c.  Turns out the tutorial's mybot code fails in exactly
+	the same way.  It segfaults in a fprintf call which tries to uses the
+	nonexistent (because it wasn't passed properly, perhaps?) 'sender' parameter,
+	which identifies the speaker of the message.
+
+	#0  silc_channel_message (client=0x804b018, conn=0x804dbd0, sender=0x80504f0, channel=0x804f800,
+	    payload=0x8052cf8, flags=0, message=0x100 <Address 0x100 out of bounds>, message_len=134556784)
+	    at mybot.c:178
+
+2. We noticed today that older gcc versions seem to cause weird errors on
+some of the SilcClientOperations callbacks.  specifically:
+
+23:49 <mATh> Preparing to replace gcc-3.3-base 1:3.3-0pre9 (using
+             .../gcc-3.3-base_1%3a3.3.4-9_i386.deb) ...
+
+doing that upgrade fixed these problems math encountered when trying to
+install my code at home:
+
+23:37 <mATh> Client_912d.xs: In function `silc_say':
+23:37 <mATh> Client_912d.xs:548: parse error before `va'
+23:37 <mATh> Client_912d.xs:549: `va' undeclared (first use in this function)
+23:37 <mATh> Client_912d.xs: In function `silc_notify':
+23:37 <mATh> Client_912d.xs:673: parse error before `*'
+23:37 <mATh> Client_912d.xs:676: `rv_self' undeclared (first use in this
+             function)
+23:37 <mATh> Client_912d.xs:676: `stash' undeclared (first use in this function)23:37 <mATh> Client_912d.xs:679: `self' undeclared (first use in this function)
+23:39 <mATh>      547   /* construct the message from the variable arglist */
+23:39 <mATh>      548   va_list va;
+23:39 <mATh>      549   va_start(va, msg);
+
+
+Net-SILC version 0.03
+=====================
+
+The README is used to introduce the module and provide instructions on
+how to install the module, any machine dependencies it may have (for
+example C compilers and installed libraries) and any other information
+that should be provided before the module is installed.
+
+A README file is required for CPAN modules since CPAN extracts the
+README file from a module distribution so that people browsing the
+archive can use it get an idea of the modules uses. It is usually a
+good idea to provide version information here so that people can
+decide whether fixes for the module are worth downloading.
+
+INSTALLATION
+
+To install this module type the following:
+
+   perl Makefile.PL
+   make
+   make test
+   make install
+
+DEPENDENCIES
+
+This module requires these other modules and libraries:
+
+  blah blah blah
+
+COPYRIGHT AND LICENCE
+
+Put the correct copyright and licence information here.
+
+Copyright (C) 2004 by Derek Laventure 
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.8.3 or,
+at your option, any later version of Perl 5 you may have available.
+
+
